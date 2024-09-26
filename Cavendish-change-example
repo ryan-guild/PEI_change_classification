@@ -1,0 +1,288 @@
+//Clip the images to the land cover area
+//nonocean is a geometry that covers all pre-existing beach areas and inland dune systems that experienced visible change in the post-storm periods; 
+//seaward extent of nonocean geometry is several meters into nearshore zone (compared across three images), while landward extent includes several meters beyond landward extent of post-storm beach expansion
+var clipped_pre = pre.clip(nonocean)
+var clipped_post = post.clip(nonocean)
+var revisit_image = revisit.clip(nonocean)
+
+//Map.centerObject(nonocean)
+
+Map.addLayer(clipped_pre.select(['b6', 'b4', 'b2']), {min:1442, max:10470, gamma:1.7}, 'pre-Fiona, Cavendish', false)
+Map.addLayer(clipped_post.select(['b6', 'b4', 'b2']), {min: 775, max:4398, gamma:1.7}, 'post-Fiona, Cavendish', false)
+Map.addLayer(revisit_image.select(['b6', 'b4', 'b2']), {min: 2000, max:9850, gamma:1.7}, 'revisit, Cavendish')
+
+
+
+
+
+//----------------------------------------------------
+//1. PRE-IMAGE
+    //Merge the feature collections
+    var classNames_pre = drysand_pre.merge(wetsand_pre).merge(vegetation_pre).merge(water_pre);
+    
+    //Call the bands and specify a variable with the training points
+    var bands = ['b8','b7','b6','b5', 'b4', 'b3', 'b2', 'b1'];
+    var training_pre = clipped_pre.sampleRegions({collection: classNames_pre, properties: ['landcover_pre'], scale: 3});
+    
+    //Train the pre-image classifier with the training points & run the classification
+    var classifier_pre = ee.Classifier.smileCart().train({features: training_pre, classProperty: 'landcover_pre', inputProperties: bands});
+    var classified_pre = clipped_pre.select(bands).classify(classifier_pre);
+    var classified_pre = classified_pre.selfMask()
+    
+    //Display classification
+    Map.addLayer(classified_pre, {min: 1, max: 4, palette: ['yellow', 'orange', 'lightgray', 'blue']}, 'classification pre-storm', false);
+
+
+
+
+//----------------------------------------------------
+//2. POST-IMAGE
+    //Merge the feature collections
+    var classNames_post = drysand_post.merge(wetsand_post).merge(vegetation_post).merge(water_post);
+    
+    //Call the bands and specify a variable with the training points
+    var training_post = clipped_post.sampleRegions({collection: classNames_post, properties: ['landcover_post'], scale: 3});
+    
+    //Train the pre-image classifier with the training points & run the classification
+    var classifier_post = ee.Classifier.smileCart().train({features: training_post, classProperty: 'landcover_post', inputProperties: bands});
+    var classified_post = clipped_post.select(bands).classify(classifier_post);
+    var classified_post = classified_post.selfMask()
+    
+    //Display classification
+    Map.addLayer(classified_post, {min: 1, max: 4, palette: ['yellow', 'orange','lightgray','blue']}, 'classification post-storm', false);
+
+
+
+
+//----------------------------------------------------
+// //3. REVISIT IMAGE
+    //Merge the feature collections
+    var classNames_revisit = drysand_revisit.merge(wetsand_revisit).merge(vegetation_revisit).merge(water_revisit);
+    
+    //Call the bands and specify a variable with the training points
+    var training_revisit = revisit_image.sampleRegions({collection: classNames_revisit, properties: ['landcover_revisit'], scale: 3});
+    
+    
+    //Train the pre-image classifier with the training points & run the classification
+    var classifier_revisit = ee.Classifier.smileCart().train({features: training_revisit, classProperty: 'landcover_revisit', inputProperties: bands});
+    var classified_revisit = revisit_image.select(bands).classify(classifier_revisit);
+    var classified_revisit = classified_revisit.selfMask()
+    
+    //Display classification
+    Map.addLayer(classified_revisit, {min: 1, max: 4, palette: ['yellow', 'orange','lightgray','blue']}, 'classification revisit image');
+
+
+
+
+
+//----------------------------------------------------
+//4. MAP CHANGES BETWEEN PRE- & REVISIT-IMAGES
+// Create masks for habitat and non-habitat classes
+    // For PRE-IMAGE
+    var preHabitat = classified_pre.eq(1).or(classified_pre.eq(2));
+    var preNonHabitat = classified_pre.eq(3).or(classified_pre.eq(4));
+    
+    // For POST-IMAGE
+    var postHabitat = classified_post.eq(1).or(classified_post.eq(2));
+    var postNonHabitat = classified_post.eq(3).or(classified_post.eq(4));
+    
+    // For REVISIT-IMAGE
+    var revisitHabitat = classified_revisit.eq(1).or(classified_revisit.eq(2));
+    var revisitNonHabitat = classified_revisit.eq(3).or(classified_revisit.eq(4));
+
+// Calculate changes between habitat classes
+    // PRE-to-POST
+    var habitatLossPost = preHabitat.and(postNonHabitat);
+    var habitatGainPost = preNonHabitat.and(postHabitat);
+    var noChangePost = preHabitat.and(postHabitat).add(preNonHabitat.and(postNonHabitat));
+    
+    
+    // PRE-to-REVISIT
+    var habitatLossRevisit = preHabitat.and(revisitNonHabitat);
+    var habitatGainRevisit = preNonHabitat.and(revisitHabitat);
+    var noChangeRevisit = preHabitat.and(revisitHabitat).add(preNonHabitat.and(revisitNonHabitat));
+
+// Create a change map
+    // PRE-to-POST CHANGE
+    var changeMapPost = ee.Image(0)
+                    .where(habitatLossPost, 1)    // Habitat to Non-Habitat Change
+                    .where(habitatGainPost, 2)    // Non-Habitat to Habitat Change
+                    .where(noChangePost, 3)       // No Change
+    var clipped_changeMapPost = changeMapPost.clip(nonocean)
+    Map.addLayer(clipped_changeMapPost, {min: 1, max: 3, palette: ['red','green','lightgrey']}, 'Habitat Change Map - Post Fiona', false);
+    
+    
+    // PRE-to-REVISIT CHANGE
+    var changeMapRevisit = ee.Image(0)
+                    .where(habitatLossRevisit, 1)  // Habitat to Non-Habitat Change
+                    .where(habitatGainRevisit, 2)  // Non-Habitat to Habitat Change
+                    .where(noChangeRevisit, 3);    // No Change
+
+//Map the change
+var clipped_changeMapRevisit = changeMapRevisit.clip(nonocean)
+Map.addLayer(clipped_changeMapRevisit, {min: 1, max: 3, palette: ['red','green','lightgrey']}, 'Habitat Change Map - Revisit', false);
+
+
+
+
+
+
+//----------------------------------------------------
+//5. MAP POST-STORM HABITAT CHANGES THAT PERSISTED 1-YR POST STORM (& changes unrelated to Fiona)
+    var newHabitatPersisted = changeMapPost.eq(2).and(changeMapRevisit.eq(2));      //Areas where newly created habitat persisted 11-months post-storm
+    var newHabitatSinceStorm = changeMapRevisit.eq(2).and(changeMapPost.neq(2));    //Areas where habitat creation occurred only after the storm (unrelated)
+    
+    var habitatLossPersisted = changeMapPost.eq(1).and(changeMapRevisit.eq(1));     //Areas where habitat loss persisted 11-months post-storm
+    var habitatLossSinceStorm = changeMapRevisit.eq(1).and(changeMapPost.neq(1));   //Areas where habitat loss occurred only after the storm (unrelated)
+    
+    var visualizationImage = newHabitatPersisted.multiply(1)                        //1 = Storm-induced habitat creation that persisted 11-months post-storm
+                              .add(newHabitatSinceStorm.multiply(2))                //2 = Habitat creation unrelated to the storm
+                              .add(habitatLossPersisted.multiply(3))                //3 = Storm-induced habitat loss that persisted 11-months post-storm
+                              .add(habitatLossSinceStorm.multiply(4));              //4 = Habitat loss unrelated to the storm
+
+var clipped_newHabitat = visualizationImage.clip(nonocean)
+Map.addLayer(clipped_newHabitat, 
+              {min: 0, max: 4, palette: ['lightgrey',         //No change in habitat area
+                                        'green',              //Habitat creation that persisted
+                                        'cyan',               //Habitat creation unrelated to Fiona
+                                        'red',                //Habitat loss that persisted
+                                        'orange'              //Habitat loss unrelated to Fiona
+                                        ]}, 'Habitat change 1-year post-Fiona', false);
+
+
+
+
+
+//------------------------------------------------------------------
+//6. ACCURACY ASSESSMENT
+// CALCULATE # PIXELS IN EACH HABITAT CLASS
+//  pre-storm
+var prePixelCounts = classNames_pre.map(function(feature) {
+  var pixelCount = clipped_pre.reduceRegion({reducer: ee.Reducer.count(), geometry: feature.geometry(), scale: 3, maxPixels: 1e9});
+  return feature.set('pixel_count', pixelCount.get('b1'))});
+//  post-storm
+var postPixelCounts = classNames_post.map(function(feature) {
+  var pixelCount = clipped_post.reduceRegion({reducer: ee.Reducer.count(), geometry: feature.geometry(), scale: 3, maxPixels: 1e9});
+  return feature.set('pixel_count', pixelCount.get('b1'))});
+//  revisit
+var revisitPixelCounts = classNames_revisit.map(function(feature) {
+  var pixelCount = revisit_image.reduceRegion({reducer: ee.Reducer.count(), geometry: feature.geometry(), scale: 3, maxPixels: 1e9});
+  return feature.set('pixel_count', pixelCount.get('b1'))});
+
+// Print the class pixel counts
+print('Class Pixel Counts (pre-storm):', prePixelCounts);
+print('Class Pixel Counts (post-storm):', postPixelCounts);
+print('Class Pixel Counts (revisit):', revisitPixelCounts);
+
+
+
+
+// MANUAL DELINEATION OF TESTING DATASET (approximated # points needed)
+// ---------------------
+// A. CREATE TESTING DATASET FROM MANUALLY DELINEATED POINTS (approx. 30% of training points)
+//  pre-storm
+var testingPoints_pre = drysand_pre_test.merge(wetsand_pre_test).merge(vegetation_pre_test).merge(water_pre_test);
+var testingData_pre = classified_pre.sampleRegions({collection: testingPoints_pre, properties: ['landcover_pre_test'], scale: 3});
+//  post-storm
+var testingPoints_post = drysand_post_test.merge(wetsand_post_test).merge(vegetation_post_test).merge(water_post_test);
+var testingData_post = classified_post.sampleRegions({collection: testingPoints_post, properties: ['landcover_post_test'], scale: 3});
+//  revisit image
+var testingPoints_revisit = drysand_revisit_test.merge(wetsand_revisit_test).merge(vegetation_revisit_test).merge(water_revisit_test);
+var testingData_revisit = classified_revisit.sampleRegions({collection: testingPoints_revisit, properties: ['landcover_revisit_test'], scale: 3});
+
+// B. CREATE A CONFUSION MATRIX TO EVALUATE THE CLASSIFICATION ACCURACY
+//  pre-storm
+var confusionMatrix_pre = testingData_pre.errorMatrix('landcover_pre_test', 'classification');              // 'landcover_pre_test' is the true class, 'classification' is the predicted class
+print('Confusion Matrix (manual) - Pre-Storm Image:', confusionMatrix_pre);
+//  post-storm
+var confusionMatrix_post = testingData_post.errorMatrix('landcover_post_test', 'classification');           // 'landcover_post_test' is the true class, 'classification' is the predicted class
+print('Confusion Matrix (manual) - Post-Storm Image:', confusionMatrix_post);
+//  revisit
+var confusionMatrix_revisit = testingData_revisit.errorMatrix('landcover_revisit_test', 'classification');  // 'landcover_revisit_test' is the true class, 'classification' is the predicted class
+print('Confusion Matrix (manual) - Revisit Image:', confusionMatrix_revisit);
+
+// C. CALCULATE OVERALL ACCURACY
+//  pre-storm
+var overallAccuracy_pre = confusionMatrix_pre.accuracy();
+print('Overall Accuracy (manual) - Pre-Storm Image:', overallAccuracy_pre);
+//  post-storm
+var overallAccuracy_post = confusionMatrix_post.accuracy();
+print('Overall Accuracy (manual) - Post-Storm Image:', overallAccuracy_post);
+//  revisit
+var overallAccuracy_revisit = confusionMatrix_revisit.accuracy();
+print('Overall Accuracy (manual) - Revisit Image:', overallAccuracy_revisit);
+
+
+
+
+//--------------------------------------------------------
+//7. CALCULATE TOTAL # TRAINING PIXELS
+// Define a function to calculate pixel count for a geometry (point or polygon)
+// Function to calculate pixel counts for each class within a region
+var calculatePixelCounts = function(image, region) {var histogram = image.reduceRegion({reducer: ee.Reducer.frequencyHistogram().unweighted(),geometry: region,scale: 3,});
+  return ee.Feature(null, histogram);};
+
+var classified_pre_img = ee.Image(classified_pre)
+var classified_post_img = ee.Image(classified_post)
+var classified_revisit_img = ee.Image(classified_revisit)
+
+var countdrysand_pre = calculatePixelCounts(classified_pre_img, drysand_pre);
+var countwetsand_pre = calculatePixelCounts(classified_pre_img, wetsand_pre);
+var countvegetation_pre = calculatePixelCounts(classified_pre_img, vegetation_pre);
+var countwater_pre = calculatePixelCounts(classified_pre_img, water_pre);
+var countdrysand_post = calculatePixelCounts(classified_post_img, drysand_post);
+var countwetsand_post = calculatePixelCounts(classified_post_img, wetsand_post);
+var countvegetation_post = calculatePixelCounts(classified_post_img, vegetation_post);
+var countwater_post = calculatePixelCounts(classified_post_img, water_post);
+var countdrysand_revisit = calculatePixelCounts(classified_revisit_img, drysand_revisit);
+var countwetsand_revisit = calculatePixelCounts(classified_revisit_img, wetsand_revisit);
+var countvegetation_revisit = calculatePixelCounts(classified_revisit_img, vegetation_revisit);
+var countwater_revisit = calculatePixelCounts(classified_revisit_img, water_revisit);
+
+// Print the results
+print("Pixel counts, drysand pre", countdrysand_pre);
+print("Pixel counts, wetsand pre", countwetsand_pre);
+print("Pixel counts, vegetation pre", countvegetation_pre);
+print("Pixel counts, water pre", countwater_pre);
+print("Pixel counts, drysand post", countdrysand_post);
+print("Pixel counts, wetsand post", countwetsand_post);
+print("Pixel counts, vegetation post", countvegetation_post);
+print("Pixel counts, water post", countwater_post);
+print("Pixel counts, drysand revisit", countdrysand_revisit);
+print("Pixel counts, wetsand revisit", countwetsand_revisit);
+print("Pixel counts, vegetation revisit", countvegetation_revisit);
+print("Pixel counts, water revisit", countwater_revisit);
+
+
+
+//--------------------------------------------------------------------------------------
+//8. CALCULATE TOTAL # UNQIUE PIXELS PER CHANGE CATEGORY OF FINAL CHANGE IMAGE
+
+// Specify the classes interested in
+var classes = [0, 1, 2, 3, 4];
+
+// Function to calculate pixel counts for each class
+var calculateClassCounts = function(classValue) {
+  var classMask = clipped_newHabitat.eq(classValue);
+  var classCount = classMask.reduceRegion({
+    reducer: ee.Reducer.sum(),
+    geometry: nonocean,
+    scale: 3,  
+    maxPixels: 1e9  
+  });
+  return ee.Feature(null, {
+    'class': classValue,
+    'pixel_count': classCount.get(clipped_newHabitat.bandNames().get(0))
+  });
+};
+
+// Map over the classes and calculate counts
+var classCounts = ee.FeatureCollection(classes.map(calculateClassCounts));
+
+// Print the result
+print('Class Counts:');
+classCounts.getInfo().features.forEach(function(feature) {
+  var classValue = feature.properties.class;
+  var pixelCount = feature.properties.pixel_count;
+  print('Pixel ' + classValue + ' - ' + pixelCount);
+});
